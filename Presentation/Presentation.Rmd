@@ -1,0 +1,115 @@
+---
+title: "COVID-19 Responses"
+author: "Charlie Zhang"
+date: "12/01/2020"
+output:
+  beamer_presentation: default
+  ioslides_presentation: default
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(knitr)
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+## Background
+
+The COVID-19 pandemic has severely hit the world. Since January, there have been over
+63 million reported cases with over a million deaths globally.[^fn1] In light of pandemics and
+policy toolkits, countries worldwide have adopted similar and diverse measures. Social distancing measures, ranging from full-scale lockdown to voluntary self-compliance measures, have been frequently implemented for “flattening the curve.”[^fn2]
+
+The project intends to evaluate what factors affect a country's COVID-19 situations. At this moment, I think there are at least two categories-- `state capacity` and `proper responses`. 
+
+## Background
+
+Supposing: 
+
+* a country with the weak capacity and improper responses, it would be doomed; 
+* a country with the strong capacity and proper responses, it would not have much damage. 
+
+However, the above are extreme examples. Most countries fall between these two "ideal" types. Then, which category is more important? State capacity? Or proper responses? 
+
+Moreover, what factors affect the policy? Like a country relies heavily on tourism could be reluctant to impose travel restrictions (it is not necessarily true).  
+
+## Data Source
+
+* \href{https://www.coronanet-project.org/}{\textit{CoronaNet Research Project}}
+  * The datasst includes certain features of a policy implemented by the country, like start date. end date, policy level (national, provincial, or municipal), compliance (mandatory vs. voluntary)
+* \href{https://www.worldometers.info/coronavirus/}{COVID-19}
+* _World Development Indicator_ from \href{https://datacatalog.worldbank.org/dataset/world-development-indicators}{the World Bank}
+  * The dataset includes several variables that might be crucial to understand covid-19, e.g. _population_, _GDP_, _health expenditure_, _hospital bed per 1k people_, _immunization_, _life expectancy_, etc. 
+
+## Methods 
+* What is the unit of analysis?
+  * `Country-Week`
+  * Weekly data seems more stable and creates less outliers than daily data. 
+* Autocorrelation could be a problem!
+* For each country $c$ in the week $w$ (for any $w > 1$), we have the rate of change (ROC): 
+  * $ROC_{c, w}$= $\frac{Cases_{c, w}- Cases_{c,w-1}}{Cases_{c,w-1}} * 100$
+  * $ROC_{c, w}$= $\frac{Deaths_{c, w}- Deaths_{c,w-1}}{Deaths_{c,w-1}} * 100$
+
+
+## Cont'd
+* Explanatory Data Analysis (EDA) 
+  * DVs: `case_roc` and `death_roc`
+  * Key IVs: `gdp_per_capita_log`, `hospital_bed_per1k`, `lifeexp`, `active_policy` (dummy variable), `policy_strength` (mandatory vs. voluntary), and `median_policy_activity_index`
+  * A row should look like the below (policy-related variables are still under wrangling)
+
+```{r echo=FALSE, results='hold'}
+dat<- read.csv("covid.csv")
+dat[sample(nrow(dat), 1), ][2:15]
+```
+
+## Preliminary Analysis
+
+```{r, figures-side1, fig.show="hold", out.width="45%", warning= FALSE}
+plot(density(dat$cases_roc, na.rm= TRUE), main= "ROC Curve of Cases", xlim= c(-500, 500))
+plot(density(dat$deaths_roc, na.rm= TRUE), main= "ROC Curve of Deaths", xlim= c(-500, 500))
+```
+
+* The density plots above reflect that the sample size is acceptable for machine learning. 
+  * When ROC= 400, it represents that cases or deaths of this week are 4 times larger than that of last week. 
+
+
+## Cont'd 
+```{r, figures-side2, fig.show="hold", out.width="45%", warning= FALSE, message=FALSE}
+ggplot(dat, aes(x= hospital_bed_per_1k, y= cases_roc))+ 
+  geom_point(position= position_dodge(width=0.1))+
+  geom_smooth() +
+  labs(x="Hospital Bed per 1K Population", y= "Cases ROC",title= "Scatterplots between hospital beds and cases ROC") + 
+  theme_minimal()
+
+ggplot(dat, aes(x= hospital_bed_per_1k, y= deaths_roc))+ 
+  geom_point(position= position_dodge(width=0.1))+
+  geom_smooth() +
+  labs(x="Hospital Bed per 1K Population", y= "Deaths ROC", title= "Scatterplots between hospital beds and deaths ROC") +
+  theme_minimal()
+```
+
+* It is hard to conclude any relationship from the above plots. Moreover, `hospital_bed_per_1k` and `health_per_capita_log`, both of which reflect the public health infrastructure, seem to produce positive effects on cases- and deaths-ROC. Although these findings are counter-intuitive, it at least tells that state capacity is not the sole category of factors that affect the COVID-19 cases and deaths. 
+
+## Problems 
+```{r include=FALSE}
+summary(dat$cases_roc)
+summary(dat$deaths_roc)
+
+## beta1= 10.04 with ***
+summary(lm(cases_roc~hospital_bed_per_1k, dat)) 
+
+## beta1= 2.854 and not statistical significance 
+summary(lm(deaths_roc~hospital_bed_per_1k, dat))
+
+
+```
+
+* The maximum ROC is 31433.333 (`cases_roc`), which, given the infectivity of COVID-19, is understandable. However, it might create the problem for the learning. 
+  * One potential solution is to convert ROC to ordinal levels. 
+* Other than `state capacity` and `proper responses`, what are the other relevant factors under COVID-19 responses? 
+  * Restricted to the above variables would provide no other insights other than the two major categories; 
+  * Try to incorporate as many relevant variables as possible other than the above categories into the dataset, like _tourism share of gdp_, _federalism_. 
+
+
+[^fn1]: World Health Organizations. _Coronavirus disease (COVID-19) pandemic_, 2020. https:
+//www.who.int/emergencies/diseases/novel-coronavirus-2019.
+[^fn2]: Brodeur, Abel, David M Gray, Anik Islam, and Suraiya Bhuiyan. _“A Literature Review of the Economics of COVID-19,”_ 2020. 
