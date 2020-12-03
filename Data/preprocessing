@@ -14,13 +14,12 @@ import math
 wdi= pd.read_csv("~/Documents/PPOL564/Projects/WDI_csv/WDIData.csv")
 wdi= wdi.rename(columns= {"Indicator Name": "Indicator"})
 
-## list= ["Immunization, DPT (% of children ages 12-23 months)"]
-## Get hospotal bed table from
-bed= wdi.query('Indicator== ["Hospital beds (per 1,000 people)"]').reset_index().drop(['index', "Indicator", "Indicator Code"], axis=1)
 
+## Get hospotal bed table from WDIData.csv
+## bed= wdi.query('Indicator== ["Hospital beds (per 1,000 people)"]').reset_index().drop(['index', "Indicator", "Indicator Code"], axis=1)
 ## Use for loop to find the latest hospital bed data
 #hospital= list()
-#for i in range(len(bed.index)):
+## for i in range(len(bed.index)):
 #    idx= bed.iloc[i, ].last_valid_index()
 #    if idx== "Country Code":
 #        hospital.append(0)
