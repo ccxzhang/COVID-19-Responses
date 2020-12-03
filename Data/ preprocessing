@@ -1,0 +1,89 @@
+import pandas as pd
+import numpy as np
+import seaborn as sbs
+from plotnine import *
+import country_converter as coco
+import requests # For downloading the website
+from bs4 import BeautifulSoup # For parsing the website
+import locale
+import datetime
+import math
+
+
+## Load the World Development Index data
+wdi= pd.read_csv("~/Documents/PPOL564/Projects/WDI_csv/WDIData.csv")
+wdi= wdi.rename(columns= {"Indicator Name": "Indicator"})
+
+## list= ["Immunization, DPT (% of children ages 12-23 months)"]
+## Get hospotal bed table from
+bed= wdi.query('Indicator== ["Hospital beds (per 1,000 people)"]').reset_index().drop(['index', "Indicator", "Indicator Code"], axis=1)
+
+## Use for loop to find the latest hospital bed data
+#hospital= list()
+#for i in range(len(bed.index)):
+#    idx= bed.iloc[i, ].last_valid_index()
+#    if idx== "Country Code":
+#        hospital.append(0)
+#    else:
+#        hospital.append(bed.loc[i, idx])
+
+#bed["hospital"]= hospital
+#bed= bed[["Country Code", "hospital"]].rename(columns={"Country Code": "iso_code"})
+
+## Write a function to get the latest data aviliable
+def getLatest(ind= None):
+    df= pd.DataFrame()
+    for i in ind:
+        item= wdi.loc[wdi.Indicator== i].reset_index().drop(['index', "Indicator", "Indicator Code"], axis=1)
+        temp= list()
+        for j in range(len(item.index)):
+            idx= item.iloc[j, ].last_valid_index()
+            if idx== "Country Code":
+                temp.append(0)
+            else:
+                temp.append(item.loc[j, idx])
+        df[str(i)]= temp
+    return df
+
+indicator= ["Population, total", "GDP (constant 2010 US$)", "GDP per capita (constant 2010 US$)", "Current health expenditure per capita (current US$)",
+            "Hospital beds (per 1,000 people)", "Life expectancy at birth, total (years)"]
+situation= getLatest(ind= indicator)
+situation["iso_code"]= wdi["Country Code"].unique()
+situation
+## Load the data, select the most relevant columns
+covid= pd.read_csv("owid-covid-data.csv")
+covid
+raw= covid.iloc[:, :10]
+raw= raw[~raw.continent.isna()==True].fillna(0)
+raw["date"]= pd.to_datetime(raw["date"])
+
+##
+test= raw[["iso_code", "date", "new_cases", "new_deaths"]]
+test= test.groupby("iso_code").resample("W-Tue", on= "date").sum().reset_index()
+
+
+## Create last-week-situation variavles
+test["last_week_cases"]= test.groupby("iso_code")["new_cases"].shift(1)
+test["last_week_deaths"]= test.groupby("iso_code")["new_deaths"].shift(1)
+test= test.fillna(0)
+
+## Create ROC variables
+test["cases_roc"]= (test["new_cases"]- test["last_week_cases"])*100/test["last_week_cases"]
+test["deaths_roc"]= (test["new_deaths"]- test["last_week_deaths"])*100/test["last_week_deaths"]
+
+## Convert infinity to np.nan
+test["cases_roc"]= [np.nan if math.isinf(i)== True else i for i in test.cases_roc]
+test["deaths_roc"]= [np.nan if math.isinf(i)== True else i for i in test.deaths_roc]
+
+## Create the week number to faciliate further analysis
+test["week_number"]= [i.isocalendar()[1] for i in test.date]
+
+## Merge the dataframes and rename the columns
+com= pd.merge(test, situation, on="iso_code").rename(columns= { "Population, total": "pop",
+                                                                "GDP (constant 2010 US$)": "gdp",
+                                                                "GDP per capita (constant 2010 US$)": "gdp_per_capita",
+                                                                "Current health expenditure per capita (current US$)": "health_per_capita",
+                                                                "Hospital beds (per 1,000 people)": "hospital_bed_per_1k",
+                                                                "Life expectancy at birth, total (years)": "lifeexp"})
+com["health_per_capita_log"]= np.log(com["health_per_capita"]+1)
+com.to_csv("covid.csv")
