@@ -1,0 +1,180 @@
+import pandas as pd
+import numpy as np
+from plotnine import *
+import seaborn as sbs
+import country_converter as coco
+import locale
+from datetime import datetime, date, timedelta
+import calendar
+import math
+
+## Load the data, select the most relevant columns
+covid= pd.read_csv("~/Documents/PPOL564/Projects/owid-covid-data.csv")
+covid
+
+## Drop rows without continent
+covid= covid[~covid.continent.isna()==True].fillna(0)
+covid["date"]= pd.to_datetime(covid["date"])
+
+## Select relevant columns
+test= covid[["iso_code", "date", "new_cases", "new_deaths"]]
+test= test.groupby("iso_code").resample("W-Tue", on= "date").sum().reset_index()
+
+## Create last-week-situation variavles
+test["last_week_cases"]= test.groupby("iso_code")["new_cases"].shift(1)
+test["last_week_deaths"]= test.groupby("iso_code")["new_deaths"].shift(1)
+test= test.fillna(0)
+
+## Create ROC variables
+test["cases_roc"]= (test["new_cases"]- test["last_week_cases"])*100/test["last_week_cases"]
+test["deaths_roc"]= (test["new_deaths"]- test["last_week_deaths"])*100/test["last_week_deaths"]
+
+## Convert infinity to np.nan
+test["cases_roc"]= [np.nan if math.isinf(i)== True else i for i in test.cases_roc]
+test["deaths_roc"]= [np.nan if math.isinf(i)== True else i for i in test.deaths_roc]
+
+## Create a dataframe with one-unit shift up to reflect next week's roc
+test_shift= pd.DataFrame()
+for i in test.iso_code.unique():
+    iso= test.loc[test.iso_code== i].reset_index().drop(columns= ["index"])
+    iso["cases_roc"]= iso["cases_roc"].shift(-1)
+    iso["deaths_roc"]= iso["deaths_roc"].shift(-1)
+    test_shift= test_shift.append(iso, ignore_index= True)
+
+test_shift.head()
+
+## Create the week number to faciliate further analysis
+test["week_number"]= [i.isocalendar()[1] for i in test.date]
+test_shift["week_number"]= [i.isocalendar()[1] for i in test_shift.date]
+test.set_index(["iso_code", "week_number"]).head(30)
+test.to_csv("test.csv")
+
+## Select relevant columns
+release= pd.read_csv("~/Documents/PPOL564/Projects/coronanet_release.csv", encoding='mac_roman')
+policy= release[["country", "ISO_A3","date_start", "date_end", "domestic_policy", "init_country_level", "index_med_est", "type", "target_country", "compliance"]]
+policy.info()
+policy.head(50)
+
+## As the unit of analysis is country-week, here only keeps the national level policy
+national= policy[policy.init_country_level== "National"].reset_index()
+national= national.drop(columns= ["index","init_country_level"], axis=1).rename(columns= {"ISO_A3": "iso_code"})
+
+## Drop any row whose index_med_est== na
+national= national[~national.index_med_est.isna()== True].reset_index().drop(columns= ["index"], axis=1)
+
+## convert to datetimestamp
+national["date_start"]=  pd.to_datetime(national["date_start"])
+national["date_end"]= pd.to_datetime(national["date_end"])
+
+## Option A: drop the missing end dates
+national= national[~national.date_end.isna()== True].reset_index().drop(columns= ["index"], axis=1)
+national.info()
+
+## Get the week number of each implemented policy
+week_end= [datetime.fromisoformat(str(i)).isocalendar()[1] for i in national.date_end]
+week_start= [datetime.fromisoformat(str(i)).isocalendar()[1] for i in national.date_start]
+national["week_start"]= week_start
+national["week_end"]= week_end
+
+## Create dummies for policy type
+dummy= pd.get_dummies(national["type"])
+national= pd.concat([national, dummy], axis=1)
+national= national.drop(columns=["type"])
+
+## Fill na with Null
+national["compliance"]= national["compliance"].fillna("Null")
+## Write a function to convert str into ordinal variables
+def compliance_to_ordinal(x):
+    if "Jail" in x:
+        return 4
+    if "Fines" in x:
+        return 3
+    if ("Mandatory" in x) & ("Fines" not in x) & ("Jail" not in x):
+        return 2
+    if "Voluntary" in x:
+        return 1
+
+national["compliance_ordinal"]= national["compliance"].apply(compliance_to_ordinal)
+
+## Creta a country_formerge df to prepare merge with test
+country_formerge= national[["iso_code","week_start", "week_end", "index_med_est"]].drop_duplicates().reset_index().drop(columns= ["index"])
+##interval= list()
+## for idx, element in enumerate(country_formerge.week_start):
+##    start= element
+##    end= country_formerge.iloc[idx, -2]
+##    interval.append(range(start, end))
+## country_formerge["interval"]= interval
+
+## Calculate the interval between end and start
+country_formerge["length"]= country_formerge["week_end"]- country_formerge["week_start"]
+
+## Create a dataframe for the active_policy dummy variables
+forpolicydummy= (pd.merge(test[["iso_code", "week_number"]],
+                country_formerge, how= "left", left_on=["iso_code", "week_number"],
+                right_on= ["iso_code", "week_start"]).drop(columns= ["week_end", "week_start"]))
+
+## 1 means that week exists active policy, and 0 means no
+forpolicydummy.iloc[:,-1]= forpolicydummy.length.fillna(0)
+forpolicydummy["active_policy"]= np.where(forpolicydummy.length>0, 1, 0)
+
+## Write a function to get active policy dummy variable
+def getPolicyDummy():
+    'This function is to get the dummy variable for whether an active policy is implemented at that week.'
+
+    temp= pd.DataFrame()
+
+    for i in forpolicydummy.iso_code.unique():
+
+
+        iso= forpolicydummy.loc[forpolicydummy.iso_code== i].reset_index().drop(columns= ["index"])  ## Firstly filter the country
+        iso.length= iso.length.astype("int")
+
+        for idx, ele in enumerate(iso.length):
+
+            start= (iso.iloc[idx, 1])    ## start week is equal to the week_number
+            end= (iso.iloc[idx, 1]+ ele)     ## end week is equal to the week_number plus length
+
+            while start< end:
+                start +=1
+                iso.at[start, "active_policy"]= 1   ## Then change the dummy variables to 1, implying the active policy
+
+        temp= temp.append(iso, ignore_index= True)
+    return temp
+
+raw= getPolicyDummy()
+raw= raw.dropna()
+
+## The next problem is to check the overlapping rows
+raw.info()
+len(raw.iso_code.unique())*len(raw.week_number.unique())
+len(raw.week_number.unique())
+len(raw.iso_code)
+
+def check_duplicate():
+    store= list()
+    totalweek= len(raw.week_number.unique())
+
+    for i in raw.iso_code.unique():
+        iso= raw.loc[raw.iso_code== i].reset_index().drop(columns= ["index"])
+        if len(iso.iso_code)> totalweek:
+            store.append(i)
+        else:
+            pass
+    return len(store)
+
+## There are 133 countries with at least 1 duplicate rows but with different types
+check_duplicate()
+
+## Merge the separate dataframes
+raw= pd.merge(raw, test_shift[["iso_code", "week_number","cases_roc", "deaths_roc"]], how= "left", on= ["iso_code", "week_number"])
+
+final= (pd.merge(raw, national, how= "left", left_on=["iso_code", "week_number"],
+        right_on= ["iso_code", "week_start"]).drop_duplicates())
+
+final= final[~final.country.isna()== True].reset_index().drop(columns= ["index"])
+final= final[~final.cases_roc.isna()== True]
+final= final[~final.deaths_roc.isna()== True]
+final= final.reset_index().drop(columns= ["index", "index_med_est_y"])
+
+
+final.to_csv("wrangling_final.csv")
