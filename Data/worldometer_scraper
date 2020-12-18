@@ -1,0 +1,56 @@
+ import pandas as pd
+ import numpy as np
+ import seaborn as sbs
+ from plotnine import *
+ import country_converter as coco
+ import requests # For downloading the website
+ from bs4 import BeautifulSoup 
+
+
+## Scrape the covid19 data from worldmeters
+url = "https://www.worldometers.info/coronavirus/"
+page = requests.get(url)
+page.status_code
+
+page.content
+
+## Parse the content
+soup = BeautifulSoup(page.content, 'lxml')
+table = soup.find('table', attrs={'id': 'main_table_countries_today'})
+
+rows = table.find_all("tr", attrs={"style": ""})
+
+## Use for loop to append each row in table
+data = []
+for index,item in enumerate(rows):
+    ## Pass two rows that summarizes the whole world situation
+    if index < 1 or index> 215:
+        pass
+    else:
+        data.append(item.text.strip().split("\n")[:15])
+
+## Create the colname to store the names of columns
+colname= rows[0].text.strip().split("\n")[1:13]
+colname[0]= "Country"
+colname[-3]= "Cases per 1M pop"
+colname[-2]= "Deaths per 1M pop"
+colname.append("Tests per 1M pop")
+colname.append("Population")
+colname
+
+## Transfer to df
+covid= pd.DataFrame(data[1:]).drop(columns=[0], axis=1)
+covid.columns= colname
+
+## Standardize the country name by using iso3
+Code= coco.convert(names= covid["Country"].to_list(), to= "iso3", not_found= None)
+CountryCode= ["GBR" if i== "UK" else i for i in Code]
+covid["Country Code"]= CountryCode
+
+
+col= dat.columns.to_list()[1:10]
+locale.setlocale(locale.LC_ALL, 'en_US.UTF-8')
+
+temp= list()
+for i in range(dat.shape[0]):
+    temp.append(locale.atoi(dat["TotalRecovered"][i].rstrip()))
