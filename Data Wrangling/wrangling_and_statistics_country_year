@@ -1,0 +1,111 @@
+import pandas as pd
+import numpy as np
+import seaborn as sbs
+from plotnine import *
+import country_converter as coco
+import locale
+from datetime import datetime, date, timedelta
+import calendar
+import math
+from stargazer.stargazer import Stargazer
+
+## Import statistic packages
+import statsmodels.api as sm
+from statsmodels.iolib.summary2 import summary_col
+
+
+## Load the World Development Index data
+wdi= pd.read_csv("~/Documents/PPOL564/Projects/WDI_csv/WDIData.csv")
+wdi= wdi.rename(columns= {"Indicator Name": "Indicator"})
+
+## Write a function to get the latest data aviliable
+def getLatestData(ind= None):
+    df= pd.DataFrame()
+    for i in ind:
+        item= wdi.loc[wdi.Indicator== i].reset_index().drop(['index', "Indicator", "Indicator Code"], axis=1)
+        temp= list()
+        for j in range(len(item.index)):
+            idx= item.iloc[j, ].last_valid_index()
+            if idx== "Country Code":
+                temp.append(0)
+            else:
+                temp.append(item.loc[j, idx])
+        df[str(i)]= temp
+    return df
+
+indicator= (["Population, total", "GDP (constant 2010 US$)", "GDP per capita (constant 2010 US$)", "Current health expenditure per capita (current US$)",
+            "Hospital beds (per 1,000 people)", "Life expectancy at birth, total (years)", "Immunization, DPT (% of children ages 12-23 months)",
+            "International tourism, number of departures"])
+situation= getLatestData(ind= indicator)
+situation["iso_code"]= wdi["Country Code"].unique()
+situation
+
+## Load the data, select the most relevant columns
+covid= pd.read_csv("~/Documents/PPOL564/Projects/owid-covid-data.csv")
+
+## See the columns of covid
+covid.columns
+
+covid= covid[~covid.continent.isna()==True].fillna(0)
+covid["date"]= pd.to_datetime(covid["date"])
+
+## Select relevant columns and
+test= covid[["continent", "location", "iso_code", "date", "new_cases", "new_deaths", "new_tests"]]
+test= test.groupby("iso_code").sum().reset_index()
+test= pd.merge(test, situation, on= "iso_code").rename(columns= {"new_cases": "total_cases",
+                                                                "new_deaths": "total_deaths",
+                                                                "new_tests": "total_tests",
+                                                                "Population, total": "pop",
+                                                                "GDP (constant 2010 US$)": "gdp",
+                                                                "GDP per capita (constant 2010 US$)": "gdp_per_capita",
+                                                                "Current health expenditure per capita (current US$)": "health_per_capita",
+                                                                "Hospital beds (per 1,000 people)": "hospital_bed_per_1k",
+                                                                "Life expectancy at birth, total (years)": "lifeexp",
+                                                                "Immunization, DPT (% of children ages 12-23 months)": "dpt_immu",
+                                                                "International tourism, number of departures": "tour"})
+
+## Create an dummy variable tests_data_available to relect the national capacity of statistics
+test["tests_data_available"]= np.where(test["total_tests"]==0, 0, 1)
+test["cases_per_1k"]= (test["total_cases"]*1000)/test["pop"]
+test["deaths_per_1k"]= (test["total_deaths"]*1000)/test["pop"]
+test["tests_per_1k"]= (test["total_tests"]*1000)/test["pop"]
+test["cases_test_ratio"]= (test["cases_per_1k"]/test["tests_per_1k"])
+test["deaths_test_ratio"]= test["deaths_per_1k"]/test["tests_per_1k"]
+
+## Deal with the infinity after dividing
+test["cases_test_ratio"]= [np.nan if math.isinf(i)== True else i for i in test.cases_test_ratio]
+test["deaths_test_ratio"]= [np.nan if math.isinf(i)== True else i for i in test.deaths_test_ratio]
+
+test["cases_test_ratio"]= test["cases_test_ratio"].fillna(0)
+test["deaths_test_ratio"]= test["deaths_test_ratio"].fillna(0)
+## logged variales
+test["gdp_per_capita_log"]= np.log(test["gdp_per_capita"]+1)
+test["health_per_capita_log"]= np.log(test["health_per_capita"]+1)
+test["tour_log"]= np.log(test["tour"]+1)
+
+
+## Perform statistical analysis and create dv and ivs
+Y1 = test["cases_test_ratio"]
+X1 = test[["tour", 'gdp_per_capita_log', "health_per_capita_log",'hospital_bed_per_1k', 'lifeexp', "dpt_immu"]]
+X1 = sm.add_constant(X1)
+
+ks = sm.OLS(Y1, X1)
+ks_res =ks.fit()
+ks_res.summary()
+
+Y2= test["deaths_test_ratio"]
+X2 = test[["tour", 'gdp_per_capita_log', 'health_per_capita_log', 'hospital_bed_per_1k', 'lifeexp', "dpt_immu"]]
+X2= sm.add_constant(X2)
+ks2 = sm.OLS(Y2, X1)
+ks2_res =ks2.fit()
+ks2_res.summary()
+
+Y3= test["tests_per_1k"]
+X3= test[['gdp_per_capita_log', "health_per_capita_log",'hospital_bed_per_1k', 'lifeexp', "dpt_immu"]]
+X3 = sm.add_constant(X3)
+ks3 = sm.OLS(Y3, X1)
+ks3_res =ks3.fit()
+ks3_res.summary()
+
+dfoutput = summary_col([ks_res,ks2_res,ks3_res],stars=True)
+dfoutput.as_latex()
