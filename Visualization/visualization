@@ -1,0 +1,40 @@
+import numpy as np
+import pandas as pd
+from plotnine import *
+
+## load the dataset
+test= pd.read_csv("~/Documents/PPOL564/Projects/test.csv")
+
+## Convert date to datetime
+test["date"]= pd.to_datetime(test["date"])
+
+## Write a function to plot the data and roc
+def plot_without_outliers(var= None):
+    testforplot= test.copy()
+    testforplot= testforplot[testforplot[var] < testforplot[var].quantile(0.99)]
+    testforplot= testforplot[testforplot[var] > testforplot[var].quantile(0.01)]
+    rocplot= (ggplot(testforplot, aes("date", var)) +
+                geom_point(position= position_jitter, alpha= 0.5)+
+                geom_smooth(color= "blue", se= True)+
+                labs(x= "Date", y= var, title= "Scatterplots between "+ var + " and Date")+
+                theme_bw())
+    return rocplot
+
+## Save the plot
+cases_rocplot= plot_without_outliers(var= "cases_roc")
+deaths_rocplot= plot_without_outliers(var= "deaths_roc")
+cases_rocplot.save("cases_rocplot.png", dpi=400)
+deaths_rocplot.save("deaths_rocplot.png", dpi=400)
+
+## Density plot for roc
+test_density= test[["cases_roc", "deaths_roc"]]
+roc_density= (ggplot(test_density)+
+    geom_density(aes(x="cases_roc"), color= "blue")+
+    geom_density(aes(x="deaths_roc"), color="red")+
+    geom_vline(xintercept= 92.45, linetype="dashed", color="blue") +
+    geom_vline(xintercept= 135.07, linetype="dashed", color="red") +
+    xlim(-500,500)+
+    labs(x= "Cases (Blue) and Deaths (Red) ROC", y= "Density",
+            title= "Distribution of Cases and Deaths ROC") +
+    theme_bw())
+roc_density.save("roc_density.png", dpi=400)
